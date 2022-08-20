@@ -1,0 +1,1760 @@
+---
+title: "generator"
+output: html_document
+date: '2022-07-13'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+
+
+
+
+library(tidyverse)
+
+library(readxl)
+
+
+library(tidymodels)
+
+
+
+
+
+
+
+
+
+setwd("~/Projects/F1/WindTurbineFaultPrediction/Data")
+
+ 
+alarms19 = read_xlsx("alarms19.xlsx")
+
+
+alarms20 = read_xlsx("alrms20.xlsx")
+
+
+
+
+
+category = read_xlsx("alarmcate2.xlsx")
+
+
+
+
+
+```
+
+```{r}
+
+
+
+
+setwd("~/Projects/F1/WindTurbineFaultPrediction/Genbear")
+
+
+wt101 = read_xlsx("wtg101.xlsx")
+
+
+
+
+
+
+
+
+```
+
+```{r}
+
+
+wt101_cleaned = wt101 %>% pivot_longer(cols = 2:32, names_to = "metric", values_to = "meas") %>% 
+                                  separate(metric, into = c("turbines", "met"), sep = "_") %>%
+                                        mutate(met2 = str_replace_all(met, "\\h", ";")) %>%
+                                           separate(met2, into = c("x1", "x2", "x3", "x4", "x5", "x6"), sep = ";")  %>%
+                                               mutate(metric = paste(x1,x2,x3,x4, sep = "_") ) %>%
+                                                  select(PCTimeStamp, turbines, meas, metric) %>%
+                                                    pivot_wider(names_from = metric, values_from = meas)
+
+
+
+colnames(wt101_cleaned)[11] = "PA"
+colnames(wt101_cleaned)[27] = "PMX"
+colnames(wt101_cleaned)[28] = "PMN"
+colnames(wt101_cleaned)[31] = "PSD"
+colnames(wt101_cleaned)[33] = "minp"
+colnames(wt101_cleaned)[9] = "WS"
+
+
+
+```
+
+```{r}
+
+
+
+
+WTG2 <- wt101_cleaned %>%   mutate(opstate = if_else(PA< 1,
+                                      if_else(WS <4, "LOWWIND", "DOWN"), 
+                                      if_else(minp > -0,
+                                              if_else(PA > 300,
+                                                      if_else(PA < 2885,
+                                               if_else((PMX - PMN)<150, "Partial", "Full"),"Full"), "Full"), "Full"))) %>%
+                                      mutate(opstate2 = if_else(is.na(opstate), "miss", opstate)) %>%
+                                              filter(opstate %in%  c("Full", "LOWWIND"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```
+
+```{r}
+
+
+
+mod_dat = WTG2 %>% mutate(rec = 1:n()) 
+
+
+mod_dat1 = mod_dat %>% filter(rec < 35000) %>%
+                          select(-rec, -`GeneratorCoolingWaterFansSpeedAverage_(3)_NA_NA`, -PCTimeStamp, -turbines, -opstate, -opstate)
+
+
+
+
+
+
+```
+
+```{r}
+
+
+
+split = initial_split(mod_dat1, prop = 0.8)
+
+
+train_data = training(split)
+
+test_date = testing(split)
+
+
+
+
+
+
+
+
+```
+
+```{r}
+
+
+
+
+rf = rand_forest() %>%
+            set_mode("regression") %>%
+                set_engine("ranger") %>%
+                      fit(Generator_Bearing_Temp._Avg. ~ . , train_data)
+
+
+
+
+
+```
+
+### pitch ystem
+
+```{r}
+
+
+
+
+ setwd("~/Projects/F1/WindTurbineFaultPrediction/Data/Pitch/No Issues")
+
+
+
+file_read = function(x) {
+  
+  
+  file = read_xlsx(x)
+  
+  
+  
+  wtg2 = file %>% pivot_longer(cols= 2:19, names_to = "vari", values_to = "meas") %>% 
+                        separate(vari, into = c("Turbine", "Variable"), sep = "_") %>% 
+                              pivot_wider(names_from = Variable, values_from = meas)
+
+
+colnames(wtg2)[3] = "Gen_RPM"
+colnames(wtg2)[4] = "Hyd_oil_pres"
+colnames(wtg2)[5] = "Hydrau_pilot_pres"
+colnames(wtg2)[6] = "Nacelle_Temp"
+colnames(wtg2)[7] = "Nacelle_direction"
+colnames(wtg2)[8] = "Rotor_rpm"
+colnames(wtg2)[9] = "Wind_Speed"
+colnames(wtg2)[10] = "Wind_direction"
+colnames(wtg2)[11] = "Amb_temp"
+colnames(wtg2)[12] = "Power_av"
+colnames(wtg2)[13] = "Power_max"
+colnames(wtg2)[14] = "Power_min"
+colnames(wtg2)[15] = "Power_Std"
+colnames(wtg2)[16] = "Pitch_Angle_av"
+colnames(wtg2)[17] = "Pitch_angle_min"
+colnames(wtg2)[18] = "Pitch_a_pressure"
+colnames(wtg2)[19] = "Pitch_b_pressure"
+colnames(wtg2)[20] = "pitch_c_pressure"
+
+
+  return(wtg2)
+  
+  
+  
+}
+
+
+
+
+
+files = list.files()
+
+
+
+
+data = map_dfr(files, file_read)
+
+
+
+
+
+
+
+
+```
+
+
+
+```{r}
+
+
+setwd("~/Projects/F1/WindTurbineFaultPrediction/Data/Pitch/Alarms")
+
+
+alarms19 = read_xlsx("alarms19.xlsx")
+alarms20 = read_xlsx("alrms20.xlsx")
+alarms21 = read_xlsx("alarms21.xlsx")
+
+curtailment = read_xlsx("dorenelcurtailment.xlsx")
+
+alarms_sum = alarms19 %>% bind_rows(alarms20) %>% 
+                            bind_rows(alarms21)
+
+
+turbine_cat <- function(x) {
+
+  
+
+alarms3 <- alarms_sum %>% 
+                      separate(Duration, c("Ho", "Mn", "Sec"), convert = T) %>%
+                           mutate(DurationSec = Ho *60*60 + Mn *60+Sec) %>%
+                        mutate(TimeOff2 = Detected + DurationSec) %>%
+                          filter(`Event type` == "Alarm log (A)") %>%
+                              mutate(TimeOff = if_else(is.na(TimeOff2), as.POSIXct("2021/12/31 11:59"), TimeOff2)) %>%
+                                select(Unit, Code, Detected, TimeOff, DurationSec, Description)
+
+colnames(alarms3)[3] <- "TimeOn"
+
+
+  
+  
+
+  alarms5 <- alarms3 %>% filter(Unit == x) %>%#filter for the specific wind farm 
+               arrange(TimeOn) %>%                                
+                 mutate(tottime = TimeOn + DurationSec) %>%      
+                   mutate(prestar = lag(TimeOff)) %>%# getting the time the previous alarm started
+                    mutate(delta = (difftime(TimeOn, prestar, units = "mins"))) %>% 
+                      mutate(alst = if_else(delta > 60, 1, 0)) %>% 
+                        mutate(alstr = if_else(is.na(alst), 1, alst)) %>% 
+                        mutate(prestar2 = lead(TimeOn)) %>%# getting the time the previous alarm started
+                    mutate(delta2 = (difftime(prestar2, TimeOff, units = "mins"))) %>% 
+                   mutate(alst2 = if_else(delta2 > 60, 1, 0)) %>% 
+                       mutate(alstr2 = if_else(is.na(alst2), 1, alst2)) 
+  
+  alarmson <- alarms5 %>% filter(alstr == 1) %>% 
+                            select(Unit, Code, TimeOn)
+   
+  alamsoff <- alarms5 %>% filter(alstr2 == 1 ) %>% 
+                            select(TimeOff)
+  
+  WTG_alarms <- alarmson %>% bind_cols(alamsoff)
+                     
+    
+  
+  
+  colnames(WTG_alarms)[3] <- "On"
+  colnames(WTG_alarms)[4] <- "Off"
+  
+  
+  
+  return(WTG_alarms)
+  
+}
+
+
+
+turbines <- c("WTG101", "WTG102", "WTG103", "WTG104", "WTG105", "WTG106", "WTG107", "WTG108", "WTG201", "WTG202", "WTG203", "WTG204", "WTG205", "WTG206", "WTG207", "WTG208", "WTG209", "WTG301", "WTG302", "WTG303", "WTG304", "WTG305", "WTG306", "WTG307", "WTG401", "WTG402", "WTG403", "WTG404", "WTG405", "WTG406", "WTG407", "WTG408", "WTG501", "WTG502", "WTG503", "WTG504", "WTG505", "WTG506", "WTG507", "WTG508","WTG601", "WTG602", "WTG603", "WTG604", "WTG605", "WTG606", "WTG607", "WTG608", "WTG609","WTG610", "WTG701", "WTG702", "WTG703", "WTG704", "WTG705", "WTG706", "WTG707", "WTG708", "WTG709" )
+
+
+dorenel <- map_dfr(turbines, turbine_cat)
+
+
+
+colnames(category)[1] = "Code"
+
+dorenel$Code = as.numeric(as.character(dorenel$Code))
+
+dore2 = dorenel %>% left_join(category, by = "Code") %>% 
+                        filter(Code == 3674) %>% 
+                          mutate(started = On - 7776000) %>% 
+                            select(Unit, started, Off) %>% 
+                                pivot_longer(cols = 2:3, names_to = "onoff", values_to = "PCTimeStamp") %>% 
+                                    rename(Turbine = Unit) %>% 
+                                      mutate(TS = lubridate::round_date(PCTimeStamp, "10 minutes") ) %>% 
+                                        select(-PCTimeStamp) %>% 
+                                            rename(PCTimeStamp = TS)
+
+
+
+
+```
+
+
+
+
+```{r}
+
+
+
+
+
+
+data_cleaned = data %>% mutate(opstate = if_else(Power_min < 1, 
+                                        if_else(Wind_Speed <4, "LOWWIND", "DOWN"),  
+                                        if_else(Pitch_angle_min > -2, 
+                                                if_else(Power_min > 250, 
+                                                        if_else(Power_min < 2850, 
+                                                                if_else((Power_max - Power_min)<150, "Partial", "Full"),
+                                                                "Full"), "Full"), "Full")))  %>% 
+                                              filter(opstate %in% c("LOWWIND", "Full")) %>%
+                                                  left_join(dore2, by = c("PCTimeStamp", "Turbine")) %>% 
+                                                      fill(onoff, .direction = "down") %>% 
+                                                          filter(is.na(onoff)) %>% 
+                                                      filter(PCTimeStamp < as.POSIXct("2022-01-01")) %>%
+                                                  select(-PCTimeStamp, -Turbine, -opstate, -onoff)
+ 
+
+
+
+clean_sample = data_cleaned %>%
+ 
+
+                                sample_n(10000)
+
+
+
+
+
+
+
+```
+
+```{r}
+
+
+
+
+
+split = initial_split(clean_sample, prop = 0.8)
+
+
+train_data_pitch = training(split)
+
+test_date_pitch = testing(split)
+
+
+
+
+
+
+
+```
+
+
+
+
+# nobm
+
+
+```{r}
+
+
+
+
+
+rf = rand_forest() %>%
+            set_mode("regression") %>%
+                set_engine("ranger") %>%
+                      fit(Hydrau_pilot_pres ~ . , train_data_pitch)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```
+
+```{r}
+
+
+set.seed(43842)
+
+folds_turb = vfold_cv(train_data_pitch, v = 20) 
+
+
+folds_turb
+
+
+
+
+
+```
+
+
+
+### pca 
+```{r}
+
+
+
+turbine_rec <-
+  recipe(Hydrau_pilot_pres ~ ., data = train_data_pitch) %>%
+  step_zv(all_numeric_predictors()) %>%
+  step_normalize(all_numeric_predictors())
+
+
+
+rec_trained <- prep(turbine_rec)
+rec_trained
+
+library(ggforce)
+
+plot_test_results <- function(recipe, dat = test_date_pitch ) {
+  recipe %>%
+    prep() %>%
+    bake(new_data = dat) %>%
+    ggplot() +
+    geom_autopoint(aes(color = Hydrau_pilot_pres), alpha = 0.4, size = 0.5) +
+    geom_autodensity(alpha = .3) +
+    facet_matrix(vars(-Hydrau_pilot_pres), layer.diag = 2) +
+    scale_color_distiller(palette = "BuPu", direction = 1) +
+    labs(color = "weeks (log)")
+}
+
+
+
+rec_trained %>%
+  step_pca(all_numeric_predictors(), num_comp = 4) %>%
+  plot_test_results() +
+  ggtitle("Principal Component Analysis")
+
+
+
+
+
+
+
+
+````
+
+
+
+### random forest 
+
+```{r}
+
+
+ranger_recipe <- 
+  recipe(formula = Hydrau_pilot_pres ~ ., data = train_data_pitch) %>% 
+  step_string2factor(one_of("opstate")) 
+
+ranger_spec <- 
+  rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>% 
+  set_mode("regression") %>% 
+  set_engine("ranger") 
+
+ranger_workflow <- 
+  workflow() %>% 
+  add_recipe(ranger_recipe) %>% 
+  add_model(ranger_spec) 
+
+set.seed(92916)
+
+
+library(finetune)
+doParallel::registerDoParallel()
+
+
+ranger_tune <-
+  tune_grid(ranger_workflow, resamples = folds_turb, grid = 20)
+
+
+
+
+
+```
+
+
+
+
+
+
+
+```{r}
+
+
+
+result = collect_metrics(ranger_tune) %>%
+                filter(.metric == "rmse")
+
+
+select_best(ranger_tune, metric = "rmse")
+
+
+
+
+
+```
+
+```{r}
+
+
+
+
+rf = rand_forest(min_n = 5, mtry = 10, trees = 1000) %>%
+            set_mode("regression") %>%
+                set_engine("ranger") %>%
+                      fit(Hydrau_pilot_pres ~ . , train_data_pitch)
+
+
+
+
+
+rf_fin <-
+  ranger_workflow %>%
+  finalize_workflow(select_best(ranger_tune, "rmse")) %>%
+  last_fit(split)
+
+
+
+
+
+
+```
+
+### xgboost 
+
+```{r}
+
+
+
+
+xg_rec = recipe(formula = Hydrau_pilot_pres ~ ., data = train_data_pitch) 
+
+
+
+xgb_spec <-
+  boost_tree(
+    trees = tune(),
+    min_n = tune(),
+    mtry = tune(),
+    learn_rate = 0.01
+  ) %>%
+  set_engine("xgboost") %>%
+  set_mode("regression")
+
+xgb_wf <- workflow(xg_rec, xgb_spec)
+
+
+library(finetune)
+doParallel::registerDoParallel()
+
+set.seed(345)
+xgb_rs <- tune_race_anova(
+  xgb_wf,
+  resamples = folds_turb,
+  grid = 20,
+  metrics = metric_set(rmse),
+  control = control_race(verbose_elim = TRUE)
+)
+
+plot_race(xgb_rs)
+
+```
+
+```{r}
+
+
+show_best(xgb_rs)
+
+
+xgb_mod1 = boost_tree(
+    trees = 1161,
+    min_n = 20,
+    mtry = 15,
+    learn_rate = 0.01
+  ) %>%
+  set_engine("xgboost") %>%
+  set_mode("regression") %>% 
+      fit(Hydrau_pilot_pres ~ ., data = train_data_pitch)
+
+
+xgb_mod1 <-
+  xgb_wf %>%
+  finalize_workflow(select_best(xgb_rs, "rmse")) %>%
+  last_fit(split)
+
+xgb_mod1
+
+
+
+```
+
+## results testing 
+
+
+
+```{r}
+
+
+
+test_rf = predict(rf, test_date_pitch)
+
+test_gb = predict(xgb_mod1, test_date_pitch)
+
+
+
+
+
+
+test_data4 =  test_date_pitch %>% bind_cols(test_rf) %>% 
+                      mutate(delta_rf = Hydrau_pilot_pres- .pred) %>% 
+                        rename(rf_pred = .pred) %>%
+                           bind_cols(test_gb) %>%
+                            mutate(delta_xb = Hydrau_pilot_pres- .pred) %>%
+                              rename(xgb_red = .pred) %>%
+                                mutate(avpred = (rf_pred + xgb_red)/2) %>% 
+                                    mutate(delta_vpred = Hydrau_pilot_pres- avpred, rowno = 1:n() )  %>%
+                                        select(rowno, delta_rf, delta_xb, delta_vpred) %>%
+                                    pivot_longer(cols = 2:4, names_to = "meas", values_to = "val")
+
+
+
+ggplot(test_data4, aes(x = val, fill = meas)) + geom_density(alpha = 0.5)
+
+
+
+
+
+```
+```{r}
+
+library(vip)
+
+xgb_fit <- extract_fit_parsnip(xgb_mod1)
+vip(xgb_fit, geom = "point", num_features = 18)
+
+
+vip_rf <- ranger_spec %>%
+  finalize_model(select_best(ranger_tune)) %>%
+  set_engine("ranger", importance = "permutation")
+3
+
+workflow() %>%
+  add_recipe(ranger_recipe) %>%
+  add_model(imp_spec) %>%
+  fit(ikea_train) %>%
+  pull_workflow_fit() %>%
+  vip(aesthetics = list(alpha = 0.8, fill = "midnightblue"))
+
+
+
+```
+
+
+
+
+```{r}
+
+turbine_function = function(x) {
+  
+  turbine = read_xlsx(x)
+  
+  
+
+  wtg2 = turbine %>% pivot_longer(cols= 2:19, names_to = "vari", values_to = "meas") %>% 
+                        separate(vari, into = c("Turbine", "Variable"), sep = "_") %>% 
+                              pivot_wider(names_from = Variable, values_from = meas) 
+colnames(wtg2)[3] = "Gen_RPM"
+colnames(wtg2)[4] = "Hyd_oil_pres"
+colnames(wtg2)[5] = "Hydrau_pilot_pres"
+colnames(wtg2)[6] = "Nacelle_Temp"
+colnames(wtg2)[7] = "Nacelle_direction"
+colnames(wtg2)[8] = "Rotor_rpm"
+colnames(wtg2)[9] = "Wind_Speed"
+colnames(wtg2)[10] = "Wind_direction"
+colnames(wtg2)[11] = "Amb_temp"
+colnames(wtg2)[12] = "Power_av"
+colnames(wtg2)[13] = "Power_max"
+colnames(wtg2)[14] = "Power_min"
+colnames(wtg2)[15] = "Power_Std"
+colnames(wtg2)[16] = "Pitch_Angle_av"
+colnames(wtg2)[17] = "Pitch_angle_min"
+colnames(wtg2)[18] = "Pitch_a_pressure"
+colnames(wtg2)[19] = "Pitch_b_pressure"
+colnames(wtg2)[20] = "pitch_c_pressure"
+
+
+return(wtg2)
+  
+}
+
+
+
+setwd("~/Projects/F1/WindTurbineFaultPrediction/Data/Pitch/Issues")
+
+
+files = list.files()
+
+fail_data = map_dfr(files, turbine_function)
+
+
+
+
+
+```
+
+```{r}
+
+
+
+  wtg2 = dore104 %>% pivot_longer(cols= 2:19, names_to = "vari", values_to = "meas") %>% 
+                        separate(vari, into = c("Turbine", "Variable"), sep = "_") %>% 
+                              pivot_wider(names_from = Variable, values_from = meas)
+
+
+colnames(wtg2)[3] = "Gen_RPM"
+colnames(wtg2)[4] = "Hyd_oil_pres"
+colnames(wtg2)[5] = "Hydrau_pilot_pres"
+colnames(wtg2)[6] = "Nacelle_Temp"
+colnames(wtg2)[7] = "Nacelle_direction"
+colnames(wtg2)[8] = "Rotor_rpm"
+colnames(wtg2)[9] = "Wind_Speed"
+colnames(wtg2)[10] = "Wind_direction"
+colnames(wtg2)[11] = "Amb_temp"
+colnames(wtg2)[12] = "Power_av"
+colnames(wtg2)[13] = "Power_max"
+colnames(wtg2)[14] = "Power_min"
+colnames(wtg2)[15] = "Power_Std"
+colnames(wtg2)[16] = "Pitch_Angle_av"
+colnames(wtg2)[17] = "Pitch_angle_min"
+colnames(wtg2)[18] = "Pitch_a_pressure"
+colnames(wtg2)[19] = "Pitch_b_pressure"
+colnames(wtg2)[20] = "pitch_c_pressure"
+
+
+
+
+
+```
+
+```{r}
+
+
+wtg2_2 = wtg2 %>% drop_na()
+
+
+preds = predict(rf, wtg2_2)
+
+
+
+wtg2_b = wtg2_2 %>% bind_cols(preds) %>% 
+                      mutate(delta = Hydrau_pilot_pres- .pred) %>% 
+                          mutate(row = 1:n())
+
+
+
+
+
+
+
+
+
+
+ggplot(wtg2_b, aes(x = row, y = delta)) + geom_line()
+
+
+
+
+
+```
+
+```{r}
+
+
+
+fail_data2 = fail_data %>% drop_na()
+
+
+preds = predict(rf, fail_data2)
+
+
+
+fail_data3 = fail_data2 %>% bind_cols(preds) %>% 
+                      mutate(delta = Hydrau_pilot_pres- .pred) %>% 
+                            group_by(Turbine) %>% 
+                          mutate(row = 1:n())
+
+
+
+
+
+ggplot(fail_data3, aes(x = row, y = delta)) + geom_line() + facet_wrap(~Turbine, scales = "free")
+
+
+
+ggplot(fail_data3, aes(x = row, y = delta, col = Turbine)) + geom_line()
+
+
+```
+
+
+
+
+```{r}
+
+
+
+
+
+preds = predict(xgb_mod1, fail_data2)
+
+
+
+fail_data4 = fail_data2 %>% bind_cols(preds) %>% 
+                      mutate(delta = Hydrau_pilot_pres- .pred) %>% 
+                            group_by(Turbine) %>% 
+                          mutate(row = 1:n())
+
+
+
+
+
+ggplot(fail_data4, aes(x = row, y = delta)) + geom_line() + facet_wrap(~Turbine, scales = "free")
+
+
+
+ggplot(fail_data4, aes(x = row, y = delta, col = Turbine)) + geom_line()
+
+
+
+
+
+
+
+
+```
+
+
+
+```{r}
+
+
+result_plot = function(x){
+  
+  
+  
+  
+dore3 = dorenel %>% left_join(category, by = "Code") %>% 
+                             select(Unit, On, Off) %>% 
+                                pivot_longer(cols = 2:3, names_to = "onoff", values_to = "PCTimeStamp") %>% 
+                                    rename(Turbine = Unit) %>% 
+                                      mutate(TS = lubridate::round_date(PCTimeStamp, "10 minutes") ) %>% 
+                                        select(-PCTimeStamp) %>% 
+                                            rename(PCTimeStamp = TS)  
+
+
+
+wtg104 = fail_data3 %>% left_join(dore3, by = c("PCTimeStamp", "Turbine")) %>% 
+                                  filter(Turbine == x)  %>% 
+                                    fill(onoff, .direction = "down") %>%
+                                      mutate(high =  if_else(is.na(onoff), "nof", 
+                                                                if_else(onoff == "On", "fault", "nof"))) %>% 
+                                        mutate(highlight = if_else(high == "nof", 
+                                                                   if_else(delta >-1.75, "ok", "low" ), high)) %>%
+   
+                                   filter(highlight %in% c("low", "fault"))
+
+
+
+ 
+ggplot(wtg104, aes(x = row, y = delta, col = highlight)) +geom_point() + 
+                                                                  labs(title = x)
+
+
+  
+  
+  
+  
+}
+
+
+result_plot("WTG104")
+
+
+result_plot("WTG105")
+
+
+
+result_plot("WTG202")
+
+
+
+
+result_plot("WTG207")
+
+
+
+
+result_plot("WTG208")
+
+
+
+
+result_plot("WTG209")
+
+
+
+
+
+result_plot("WTG108")
+
+````
+
+```{r}
+
+
+
+
+  
+dore3 = dorenel %>% left_join(category, by = "Code") %>% 
+                        filter(Code == 3674) %>% 
+                             select(Unit, On, Off) %>% 
+                                pivot_longer(cols = 2:3, names_to = "onoff", values_to = "PCTimeStamp") %>% 
+                                    rename(Turbine = Unit) %>% 
+                                      mutate(TS = lubridate::round_date(PCTimeStamp, "10 minutes") ) %>% 
+                                        select(-PCTimeStamp) %>% 
+                                            rename(PCTimeStamp = TS)  
+
+
+
+wtg104 = fail_data3 %>% left_join(dore3, by = c("PCTimeStamp", "Turbine")) %>% 
+                                  filter(Turbine == "WTG202")  %>% 
+                                   # fill(onoff, .direction = "down") %>%
+                                    mutate(highlight = if_else(onoff == "On", "Fault", 
+                                                               if_else(delta >-1.75, "ok", "low"))) %>% 
+                                   filter(highlight %in% c("low", "Fault"))
+
+
+
+ 
+ggplot(wtg104, aes(x = row, y = delta, col = highlight)) +geom_point() + 
+                                                                  labs(title = x)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+````
+
+
+
+```{r}
+
+
+
+
+wtg105 = fail_data2 %>% filter(Turbine == "WTG105") 
+
+
+predict_rf = predict(rf, wtg105)
+
+predict_xgb = predict(xgb_mod1, wtg105)
+
+
+wtg105_2 = wtg105 %>% bind_cols(predict_rf) %>% 
+                        rename(rf_pred = .pred) %>% 
+                          bind_cols(predict_xgb) %>% 
+                            rename(xgb_pred = .pred) %>% 
+                            mutate(avpred = (xgb_pred + rf_pred)/2) %>% 
+                                mutate(row = 1:n()) %>% 
+                              select(PCTimeStamp, Turbine, row, rf_pred, xgb_pred, avpred) %>% 
+                                pivot_longer(cols = 4:6, names_to = "meas", values_to = "val")
+
+
+ggplot(wtg105_2, aes(x = row, y = val, col = meas)) + geom_line(alpha = 0.5)
+
+
+
+
+
+
+```
+
+
+
+
+
+````{r}
+
+
+
+
+wtg105_2 = wtg105 %>% bind_cols(predict_rf) %>% 
+                        rename(rf_pred = .pred) %>% 
+                          bind_cols(predict_xgb) %>% 
+                            rename(xgb_pred = .pred) %>% 
+                            mutate(avpred = (xgb_pred + rf_pred)/2) %>% 
+                                mutate(row = 1:n()) %>% 
+                                  mutate(delta = Hydrau_pilot_pres- avpred) %>% 
+                                    filter(Power_av > 0)
+
+
+ggplot(wtg105_2, aes(x = row, y = delta)) + geom_line()
+
+
+
+
+
+
+````
+
+
+
+
+# Clasification 
+
+```{r}
+
+
+
+ setwd("~/Projects/F1/WindTurbineFaultPrediction/Data/Pitch/No Issues")
+
+
+
+file_read = function(x) {
+  
+  
+  file = read_xlsx(x)
+  
+  
+  
+  wtg2 = file %>% pivot_longer(cols= 2:19, names_to = "vari", values_to = "meas") %>% 
+                        separate(vari, into = c("Turbine", "Variable"), sep = "_") %>% 
+                              pivot_wider(names_from = Variable, values_from = meas)
+
+
+colnames(wtg2)[3] = "Gen_RPM"
+colnames(wtg2)[4] = "Hyd_oil_pres"
+colnames(wtg2)[5] = "Hydrau_pilot_pres"
+colnames(wtg2)[6] = "Nacelle_Temp"
+colnames(wtg2)[7] = "Nacelle_direction"
+colnames(wtg2)[8] = "Rotor_rpm"
+colnames(wtg2)[9] = "Wind_Speed"
+colnames(wtg2)[10] = "Wind_direction"
+colnames(wtg2)[11] = "Amb_temp"
+colnames(wtg2)[12] = "Power_av"
+colnames(wtg2)[13] = "Power_max"
+colnames(wtg2)[14] = "Power_min"
+colnames(wtg2)[15] = "Power_Std"
+colnames(wtg2)[16] = "Pitch_Angle_av"
+colnames(wtg2)[17] = "Pitch_angle_min"
+colnames(wtg2)[18] = "Pitch_a_pressure"
+colnames(wtg2)[19] = "Pitch_b_pressure"
+colnames(wtg2)[20] = "pitch_c_pressure"
+
+
+  return(wtg2)
+  
+  
+  
+}
+
+
+
+
+
+files = list.files()
+
+
+
+
+data1 = map_dfr(files, file_read)
+
+
+
+
+
+
+turbine_function = function(x) {
+  
+  turbine = read_xlsx(x)
+  
+  
+
+  wtg2 = turbine %>% pivot_longer(cols= 2:19, names_to = "vari", values_to = "meas") %>% 
+                        separate(vari, into = c("Turbine", "Variable"), sep = "_") %>% 
+                              pivot_wider(names_from = Variable, values_from = meas) 
+colnames(wtg2)[3] = "Gen_RPM"
+colnames(wtg2)[4] = "Hyd_oil_pres"
+colnames(wtg2)[5] = "Hydrau_pilot_pres"
+colnames(wtg2)[6] = "Nacelle_Temp"
+colnames(wtg2)[7] = "Nacelle_direction"
+colnames(wtg2)[8] = "Rotor_rpm"
+colnames(wtg2)[9] = "Wind_Speed"
+colnames(wtg2)[10] = "Wind_direction"
+colnames(wtg2)[11] = "Amb_temp"
+colnames(wtg2)[12] = "Power_av"
+colnames(wtg2)[13] = "Power_max"
+colnames(wtg2)[14] = "Power_min"
+colnames(wtg2)[15] = "Power_Std"
+colnames(wtg2)[16] = "Pitch_Angle_av"
+colnames(wtg2)[17] = "Pitch_angle_min"
+colnames(wtg2)[18] = "Pitch_a_pressure"
+colnames(wtg2)[19] = "Pitch_b_pressure"
+colnames(wtg2)[20] = "pitch_c_pressure"
+
+
+return(wtg2)
+  
+}
+
+
+
+setwd("~/Projects/F1/WindTurbineFaultPrediction/Data/Pitch/Issues")
+
+
+files = list.files()
+
+data2 = map_dfr(files, turbine_function)
+
+
+
+
+
+
+all_data = data1 %>% 
+                    bind_rows(data2)
+
+
+
+
+
+
+
+```
+
+
+```{r}
+
+
+
+
+
+
+
+
+
+
+````
+
+## power crve forming 
+
+```{r}
+
+
+
+
+
+
+all_faults = dorenel %>% left_join(category, by = "Code") %>% 
+                    
+                            select(Unit, On, Off) %>% 
+                                pivot_longer(cols = 2:3, names_to = "onoff", values_to = "PCTimeStamp") %>% 
+                                    rename(Turbine = Unit) %>% 
+                                      mutate(TS = lubridate::round_date(PCTimeStamp, "10 minutes") ) %>% 
+                                        select(-PCTimeStamp) %>% 
+                                            rename(PCTimeStamp = TS)
+
+
+
+
+pitch_faults = dorenel %>% left_join(category, by = "Code") %>% 
+                        filter(Category == "Pitch System") %>% 
+                                mutate(started = On - 86400, fin = On-600) %>%
+                              
+                            select(Unit, started, fin) %>% 
+                                  
+                                pivot_longer(cols = 2:3, names_to = "onoff", values_to = "PCTimeStamp") %>% 
+                                    rename(Turbine = Unit) %>% 
+                                      mutate(TS = lubridate::round_date(PCTimeStamp, "10 minutes") ) %>% 
+                                        select(-PCTimeStamp) %>% 
+                                            rename(PCTimeStamp = TS)
+
+
+
+
+powercurve = all_data %>% left_join(all_faults, by = c("PCTimeStamp", "Turbine")) %>% 
+                                  group_by(Turbine) %>% 
+                                    fill(onoff, .direction = "down") %>%
+                                         filter(onoff != "On") %>% 
+                                            select(-onoff) %>% 
+                                        left_join(pitch_faults, by = c("PCTimeStamp", "Turbine")) %>% 
+                                  group_by(Turbine) %>% 
+                                    fill(onoff, .direction = "down") %>%
+                                         mutate(target1 = if_else(onoff == "started", "1", "0"))  %>% 
+                                          filter(!is.na(target1)) %>% 
+                                               filter(PCTimeStamp < as.POSIXct("2022-01-01")) %>%
+                                            mutate(opstate = if_else(Power_min < 1, 
+                                        if_else(Wind_Speed <4, "LOWWIND", "DOWN"),  
+                                        if_else(Pitch_angle_min > -2, 
+                                                if_else(Power_min > 250, 
+                                                        if_else(Power_min < 2850, 
+                                                                if_else((Power_max - Power_min)<150, "Partial", "Full"),
+                                                                "Full"), "Full"), "Full")))  %>% 
+                                              filter(opstate %in% c("LOWWIND", "Full")) %>% 
+                                            ungroup() %>% 
+                                              group_by(Wind_Speed) %>% 
+                                                  summarise(meanp = mean(Power_av))
+
+
+
+
+
+
+
+
+
+
+
+
+````
+
+
+
+
+```{r}
+
+
+
+
+all_faults = dorenel %>% left_join(category, by = "Code") %>% 
+                    
+                            select(Unit, On, Off) %>% 
+                                pivot_longer(cols = 2:3, names_to = "onoff", values_to = "PCTimeStamp") %>% 
+                                    rename(Turbine = Unit) %>% 
+                                      mutate(TS = lubridate::round_date(PCTimeStamp, "10 minutes") ) %>% 
+                                        select(-PCTimeStamp) %>% 
+                                            rename(PCTimeStamp = TS)
+
+
+
+
+pitch_faults = dorenel %>% left_join(category, by = "Code") %>% 
+                        filter(Category == "Pitch System") %>% 
+                                mutate(started = On - 604800, fin = On-600) %>%
+                              
+                            select(Unit, started, fin) %>% 
+                                  
+                                pivot_longer(cols = 2:3, names_to = "onoff", values_to = "PCTimeStamp") %>% 
+                                    rename(Turbine = Unit) %>% 
+                                      mutate(TS = lubridate::round_date(PCTimeStamp, "10 minutes") ) %>% 
+                                        select(-PCTimeStamp) %>% 
+                                            rename(PCTimeStamp = TS)
+
+
+
+
+data_cleaned2 = all_data %>% left_join(all_faults, by = c("PCTimeStamp", "Turbine")) %>% 
+                                  group_by(Turbine) %>% 
+                                    fill(onoff, .direction = "down") %>%
+                                         filter(onoff != "On") %>% 
+                                            select(-onoff) %>% 
+                                        left_join(pitch_faults, by = c("PCTimeStamp", "Turbine")) %>% 
+                                  group_by(Turbine) %>% 
+                                    fill(onoff, .direction = "down") %>%
+                                         mutate(target1 = if_else(onoff == "started", "1", "0"))  %>% 
+                                          filter(!is.na(target1)) %>% 
+                                               filter(PCTimeStamp < as.POSIXct("2022-01-01")) %>%
+                                            mutate(opstate = if_else(Power_min < 1, 
+                                        if_else(Wind_Speed <4, "LOWWIND", "DOWN"),  
+                                        if_else(Pitch_angle_min > -2, 
+                                                if_else(Power_min > 250, 
+                                                        if_else(Power_min < 2850, 
+                                                                if_else((Power_max - Power_min)<150, "Partial", "Full"),
+                                                                "Full"), "Full"), "Full")))  %>% 
+                                              filter(opstate %in% c("Full", "Partial")) %>%
+                                                  left_join(powercurve, by = "Wind_Speed") %>% 
+                                                    mutate(pf = Power_av/3000) %>% 
+                                                    mutate(target = as.factor(target1)) %>%
+                                                  select(target, Gen_RPM, Hyd_oil_pres, Hydrau_pilot_pres, Rotor_rpm, Wind_Speed, Amb_temp, pf,
+                                                         Pitch_Angle_av, Pitch_angle_min, Pitch_a_pressure, Pitch_b_pressure, pitch_c_pressure) 
+                                                    
+ 
+
+
+
+saple_clean2 = data_cleaned2 %>% sample_n(10000)
+
+
+
+
+
+```
+
+
+```{r}
+
+
+
+
+rotor_curve = data_cleaned2 %>% filter(target == "0") %>%
+                                  group_by(Wind_Speed) %>% 
+                                      summarise(rot_rpm_av = mean(Rotor_rpm))
+
+
+data_rotor = data_cleaned2 %>% left_join(rotor_curve, by = "Wind_Speed") %>% 
+                                             mutate(delta = Rotor_rpm- rot_rpm_av)# %>% 
+                                           # group_by(target) %>% 
+                                              #    summarise(meanpo = mean(delta))
+
+
+
+
+data_rotor2 = data_cleaned2 %>% left_join(rotor_curve, by = "Wind_Speed") %>% 
+                                             mutate(delta = abs(Rotor_rpm- rot_rpm_av)) %>% 
+                                           group_by(target) %>% 
+                                                summarise(meanpo = mean(delta))
+
+
+
+ggplot(data_rotor, aes(x = target, y = delta, col = target)) + geom_jitter(alpha = 0.1)
+
+
+ggplot(data_rotor, aes(x = delta, fill = target)) + geom_density(alpha = 0.5)
+  
+#ggplot(data_cleaned2, aes(x = Wind_Speed, y = Rotor_rpm, col = target)) + geom_point(alpha = 0.5)
+
+
+
+ggplot(data_rotor, aes(x = target, y = pf, col = target))  + geom_jitter(alpha = 0.1)
+
+
+
+```
+
+
+```{r}
+
+
+
+gencurve = data_cleaned2 %>% filter(target == "0") %>%
+                          group_by(Wind_Speed) %>% 
+                                  summarise(mean_gen = mean(Gen_RPM))
+
+
+
+pitch_curve = data_cleaned2 %>% filter(target == "0") %>% 
+                                group_by(Wind_Speed) %>% 
+                                    summarise(mean_pitch = mean(Pitch_Angle_av))
+
+```
+
+
+
+```{r}
+
+
+pressures = data_cleaned2 %>% ungroup() %>%
+                                filter(target == "0") %>%
+                                select(Hyd_oil_pres, Hydrau_pilot_pres, Pitch_a_pressure, Pitch_b_pressure, pitch_c_pressure) %>%
+                                    summarise(across(everything(), mean)) %>%
+                                        rename(HOP_AV = Hyd_oil_pres, HPP_av = Hydrau_pilot_pres, PAP_av = Pitch_a_pressure, PBP_av = Pitch_b_pressure, pcp_av = pitch_c_pressure )
+
+
+
+
+
+data_cleaned3 = data_cleaned2 %>% bind_cols(pressures) %>% 
+                                          mutate(delta_HOP = Hyd_oil_pres - HOP_AV, delta_HPP = Hydrau_pilot_pres-HPP_av, delta_PAP = Pitch_a_pressure-PAP_av, delta_PBP = Pitch_b_pressure - PBP_av, delta_pcp = pitch_c_pressure - pcp_av)  %>% 
+                                       left_join(rotor_curve, by = "Wind_Speed") %>% 
+                                           mutate(delta_rotor = Rotor_rpm- rot_rpm_av) %>% 
+                                            left_join(gencurve, by = "Wind_Speed") %>% 
+                                                mutate(delta_gen = Gen_RPM - mean_gen) %>%
+                                              left_join(pitch_curve, by = "Wind_Speed") %>% 
+                                                mutate(delta_pitch = Pitch_Angle_av - mean_pitch) %>% 
+                                                  ungroup() %>%
+                                          select(target, delta_HOP, delta_HPP, delta_PAP, delta_PBP, delta_pcp, pf, delta_rotor, delta_gen, 
+                                                 delta_pitch) 
+                                              
+
+
+
+````
+
+
+```{r}
+
+
+
+curtial2 = curtailment %>% pivot_longer(cols = 2:3, names_to = "stend", values_to = "PCTimeStamp")
+
+
+
+
+
+
+````
+
+
+
+
+```{r}
+
+
+
+
+
+data_cleaned2 = all_data %>% left_join(all_faults, by = c("PCTimeStamp", "Turbine")) %>% 
+                                  group_by(Turbine) %>% 
+                                    fill(onoff, .direction = "down") %>%
+                                         filter(onoff != "On") %>% 
+                                            select(-onoff) %>% 
+                                        left_join(pitch_faults, by = c("PCTimeStamp", "Turbine")) %>% 
+                                  group_by(Turbine) %>% 
+                                    fill(onoff, .direction = "down") %>%
+                                         mutate(target1 = if_else(onoff == "started", "1", "0"))  %>% 
+                                          filter(!is.na(target1)) %>% 
+                                            left_join(curtail2, by = c("PCTimeStamp"))
+                                               filter(PCTimeStamp < as.POSIXct("2022-01-01")) %>%
+                                            mutate(opstate = if_else(Power_min < 1, 
+                                        if_else(Wind_Speed <4, "LOWWIND", "DOWN"),  
+                                        if_else(Pitch_angle_min > -2, 
+                                                if_else(Power_min > 250, 
+                                                        if_else(Power_min < 2850, 
+                                                                if_else((Power_max - Power_min)<150, "Partial", "Full"),
+                                                                "Full"), "Full"), "Full")))  %>% 
+                                              filter(opstate %in% c("Full", "Partial")) %>%
+                                                  left_join(powercurve, by = "Wind_Speed") %>% 
+                                                    mutate(pf = Power_av/3000) %>% 
+                                                      filter(Turbine == "WTG102")
+
+
+ggplot(data_cleaned2, aes(x = Wind_Speed, y = pf)) + geom_point()
+
+
+
+wtg102 = data_cleaned2 %>% filter(Wind_Speed > 7.5) %>% 
+                              filter(pf < 0.4)
+
+
+
+```
+
+
+```{r}
+
+
+
+test_pro = data_cleaned2 %>% filter(target == "0")
+
+
+
+ggplot(test_pro, aes(x = Wind_Speed, y = pf)) + geom_point()
+
+
+
+
+
+
+```
+
+
+```{r}
+
+
+
+
+
+
+
+
+split = initial_split(data_cleaned3, prop = 0.2, strata = target)
+
+
+train_data_pitch2 = training(split)
+
+test_date_pitch2 = testing(split)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```
+
+
+
+```{r}
+
+
+
+pitch_folds = vfold_cv(train_data_pitch2, strata = target)
+
+
+lr = logistic_reg()
+
+
+class_rec = recipe(target ~ . , data = train_data_pitch2) 
+
+class_wf = workflow(class_rec, lr)
+
+
+doParallel::registerDoParallel()
+
+samp_preds = control_resamples(save_pred = TRUE)
+
+class_mod1 = fit_resamples(class_wf, pitch_folds, control = samp_preds)
+
+
+collect_metrics(class_mod1)
+
+
+#augment(class_mod1) %>% 
+ #                 roc_curve(target, .pred_target) %>% 
+  #                    autoplot()
+
+
+````
+
+
+
+```{r}
+
+
+
+
+ augment(class_mod1) %>% 
+                                 roc_curve(target, .pred_0) %>% 
+              autoplot()
+
+
+test = augment(class_mod1)
+
+
+
+```
+
+```{r}
+
+
+
+ggplot(train_data_pitch3, aes(x = target, y = delta_HOP)) + geom_jitter(alpha = 0.4)
+
+
+ggplot(train_data_pitch3, aes(x = target, y = delta_HPP)) + geom_jitter(alpha = 0.4)
+
+
+ggplot(train_data_pitch3, aes(x = target, y = delta_PAP)) + geom_jitter(alpha = 0.4)
+
+
+ggplot(train_data_pitch3, aes(x = target, y = delta_PBP)) + geom_jitter(alpha = 0.4)
+
+
+
+
+ggplot(train_data_pitch3, aes(x = target, y = delta_pcp)) + geom_jitter(alpha = 0.4)
+
+
+
+
+ggplot(train_data_pitch3, aes(x = target, y = pf)) + geom_jitter(alpha = 0.4)
+
+
+
+ggplot(train_data_pitch3, aes(x = target, y = delta_rotor)) + geom_jitter(alpha = 0.4)
+
+
+
+
+
+ggplot(train_data_pitch3, aes(x = target, y = delta_gen)) + geom_jitter(alpha = 0.4)
+
+
+ggplot(train_data_pitch3, aes(x = target, y = delta_pitch)) + geom_jitter(alpha = 0.4)
+
+
+
+
+
+
+
+
+
+
+
+
+```
+
+
+
+
+```{r}
+
+
+
+
+
+split = initial_split(data_cleaned3, prop = 0.2, strata = target)
+
+
+train_data_pitch3 = training(split)
+
+test_date_pitch3 = testing(split)
+
+
+
+set.seed(43842)
+
+folds_turb2 = vfold_cv(train_data_pitch3, v = 10) 
+
+
+
+
+
+
+
+ranger_recipe2 <- 
+  recipe(formula = target ~ ., data = train_data_pitch3) 
+
+ranger_spec_clas <- 
+  rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>% 
+  set_mode("classification") %>% 
+  set_engine("ranger") 
+
+ranger_workflow <- 
+  workflow() %>% 
+  add_recipe(ranger_recipe2) %>% 
+  add_model(ranger_spec_clas) 
+
+set.seed(92916)
+
+
+
+samp_preds = control_resamples(save_pred = TRUE)
+
+
+library(finetune)
+doParallel::registerDoParallel()
+
+
+ranger_tune <-
+  tune_grid(ranger_workflow, resamples = folds_turb2, grid = 10, control = samp_preds)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+`````
+
+
+```{r}
+
+
+collect_metrics(ranger_tune)
+
+
+
+
+ augment(ranger_tune) %>% 
+                                 roc_curve(target, .pred_1) %>% 
+              autoplot()
+
+
+test = augment(class_mod1)
+
+
+
+```

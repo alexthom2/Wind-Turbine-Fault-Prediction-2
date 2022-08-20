@@ -1,0 +1,337 @@
+---
+title: "modv2"
+output: html_document
+date: '2022-08-20'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+
+
+library(tidymodels)
+
+
+library(tidyverse)
+
+
+
+
+```
+
+### read data 
+
+#### 10 minute data 
+
+```{r}
+
+
+
+ setwd("~/Projects/F1/WindTurbineFaultPrediction/Data/Pitch/No Issues")
+
+
+
+file_read = function(x) {
+  
+  
+  file = read_xlsx(x)
+  
+  
+  
+  wtg2 = file %>% pivot_longer(cols= 2:19, names_to = "vari", values_to = "meas") %>% 
+                        separate(vari, into = c("Turbine", "Variable"), sep = "_") %>% 
+                              pivot_wider(names_from = Variable, values_from = meas)
+
+
+colnames(wtg2)[3] = "Gen_RPM"
+colnames(wtg2)[4] = "Hyd_oil_pres"
+colnames(wtg2)[5] = "Hydrau_pilot_pres"
+colnames(wtg2)[6] = "Nacelle_Temp"
+colnames(wtg2)[7] = "Nacelle_direction"
+colnames(wtg2)[8] = "Rotor_rpm"
+colnames(wtg2)[9] = "Wind_Speed"
+colnames(wtg2)[10] = "Wind_direction"
+colnames(wtg2)[11] = "Amb_temp"
+colnames(wtg2)[12] = "Power_av"
+colnames(wtg2)[13] = "Power_max"
+colnames(wtg2)[14] = "Power_min"
+colnames(wtg2)[15] = "Power_Std"
+colnames(wtg2)[16] = "Pitch_Angle_av"
+colnames(wtg2)[17] = "Pitch_angle_min"
+colnames(wtg2)[18] = "Pitch_a_pressure"
+colnames(wtg2)[19] = "Pitch_b_pressure"
+colnames(wtg2)[20] = "pitch_c_pressure"
+
+
+  return(wtg2)
+  
+  
+  
+}
+
+
+
+
+
+files = list.files()
+
+
+
+
+data1 = map_dfr(files, file_read)
+
+
+
+
+
+
+turbine_function = function(x) {
+  
+  turbine = read_xlsx(x)
+  
+  
+
+  wtg2 = turbine %>% pivot_longer(cols= 2:19, names_to = "vari", values_to = "meas") %>% 
+                        separate(vari, into = c("Turbine", "Variable"), sep = "_") %>% 
+                              pivot_wider(names_from = Variable, values_from = meas) 
+colnames(wtg2)[3] = "Gen_RPM"
+colnames(wtg2)[4] = "Hyd_oil_pres"
+colnames(wtg2)[5] = "Hydrau_pilot_pres"
+colnames(wtg2)[6] = "Nacelle_Temp"
+colnames(wtg2)[7] = "Nacelle_direction"
+colnames(wtg2)[8] = "Rotor_rpm"
+colnames(wtg2)[9] = "Wind_Speed"
+colnames(wtg2)[10] = "Wind_direction"
+colnames(wtg2)[11] = "Amb_temp"
+colnames(wtg2)[12] = "Power_av"
+colnames(wtg2)[13] = "Power_max"
+colnames(wtg2)[14] = "Power_min"
+colnames(wtg2)[15] = "Power_Std"
+colnames(wtg2)[16] = "Pitch_Angle_av"
+colnames(wtg2)[17] = "Pitch_angle_min"
+colnames(wtg2)[18] = "Pitch_a_pressure"
+colnames(wtg2)[19] = "Pitch_b_pressure"
+colnames(wtg2)[20] = "pitch_c_pressure"
+
+
+return(wtg2)
+  
+}
+
+
+
+setwd("~/Projects/F1/WindTurbineFaultPrediction/Data/Pitch/Issues")
+
+
+files = list.files()
+
+data2 = map_dfr(files, turbine_function)
+
+
+
+
+
+
+all_data = data1 %>% 
+                    bind_rows(data2)
+
+
+
+
+
+
+
+
+
+
+
+````
+
+
+## alarms 
+
+````{r}
+
+
+
+setwd("~/Projects/F1/WindTurbineFaultPrediction/Data/Pitch/Alarms")
+
+
+alarms19 = read_xlsx("alarms19.xlsx")
+alarms20 = read_xlsx("alrms20.xlsx")
+alarms21 = read_xlsx("alarms21.xlsx")
+
+curtailment = read_xlsx("dorenelcurtailment.xlsx")
+
+alarms_sum = alarms19 %>% bind_rows(alarms20) %>% 
+                            bind_rows(alarms21)
+
+
+turbine_cat <- function(x) {
+
+  
+
+alarms3 <- alarms_sum %>% 
+                      separate(Duration, c("Ho", "Mn", "Sec"), convert = T) %>%
+                           mutate(DurationSec = Ho *60*60 + Mn *60+Sec) %>%
+                        mutate(TimeOff2 = Detected + DurationSec) %>%
+                          filter(`Event type` == "Alarm log (A)") %>%
+                              mutate(TimeOff = if_else(is.na(TimeOff2), as.POSIXct("2021/12/31 11:59"), TimeOff2)) %>%
+                                select(Unit, Code, Detected, TimeOff, DurationSec, Description)
+
+colnames(alarms3)[3] <- "TimeOn"
+
+
+  
+  
+
+  alarms5 <- alarms3 %>% filter(Unit == x) %>%#filter for the specific wind farm 
+               arrange(TimeOn) %>%                                
+                 mutate(tottime = TimeOn + DurationSec) %>%      
+                   mutate(prestar = lag(TimeOff)) %>%# getting the time the previous alarm started
+                    mutate(delta = (difftime(TimeOn, prestar, units = "mins"))) %>% 
+                      mutate(alst = if_else(delta > 60, 1, 0)) %>% 
+                        mutate(alstr = if_else(is.na(alst), 1, alst)) %>% 
+                        mutate(prestar2 = lead(TimeOn)) %>%# getting the time the previous alarm started
+                    mutate(delta2 = (difftime(prestar2, TimeOff, units = "mins"))) %>% 
+                   mutate(alst2 = if_else(delta2 > 60, 1, 0)) %>% 
+                       mutate(alstr2 = if_else(is.na(alst2), 1, alst2)) 
+  
+  alarmson <- alarms5 %>% filter(alstr == 1) %>% 
+                            select(Unit, Code, TimeOn)
+   
+  alamsoff <- alarms5 %>% filter(alstr2 == 1 ) %>% 
+                            select(TimeOff)
+  
+  WTG_alarms <- alarmson %>% bind_cols(alamsoff)
+                     
+    
+  
+  
+  colnames(WTG_alarms)[3] <- "On"
+  colnames(WTG_alarms)[4] <- "Off"
+  
+  
+  
+  return(WTG_alarms)
+  
+}
+
+
+
+turbines <- c("WTG101", "WTG102", "WTG103", "WTG104", "WTG105", "WTG106", "WTG107", "WTG108", "WTG201", "WTG202", "WTG203", "WTG204", "WTG205", "WTG206", "WTG207", "WTG208", "WTG209", "WTG301", "WTG302", "WTG303", "WTG304", "WTG305", "WTG306", "WTG307", "WTG401", "WTG402", "WTG403", "WTG404", "WTG405", "WTG406", "WTG407", "WTG408", "WTG501", "WTG502", "WTG503", "WTG504", "WTG505", "WTG506", "WTG507", "WTG508","WTG601", "WTG602", "WTG603", "WTG604", "WTG605", "WTG606", "WTG607", "WTG608", "WTG609","WTG610", "WTG701", "WTG702", "WTG703", "WTG704", "WTG705", "WTG706", "WTG707", "WTG708", "WTG709" )
+
+
+dorenel <- map_dfr(turbines, turbine_cat)
+
+
+
+colnames(category)[1] = "Code"
+
+dorenel$Code = as.numeric(as.character(dorenel$Code))
+
+dore2 = dorenel %>% left_join(category, by = "Code") %>% 
+                        filter(Code == 3674) %>% 
+                          mutate(started = On - 7776000) %>% 
+                            select(Unit, started, Off) %>% 
+                                pivot_longer(cols = 2:3, names_to = "onoff", values_to = "PCTimeStamp") %>% 
+                                    rename(Turbine = Unit) %>% 
+                                      mutate(TS = lubridate::round_date(PCTimeStamp, "10 minutes") ) %>% 
+                                        select(-PCTimeStamp) %>% 
+                                            rename(PCTimeStamp = TS)
+
+
+
+
+
+
+
+curtail2 = curtailment %>% pivot_longer(cols = 2:3, names_to = "starend", values_to = "PCTimeStamp")
+
+
+
+
+
+
+```
+
+
+
+```{r}
+
+
+
+
+all_faults = dorenel %>% left_join(category, by = "Code") %>% 
+                    
+                            select(Unit, On, Off) %>% 
+                                pivot_longer(cols = 2:3, names_to = "onoff", values_to = "PCTimeStamp") %>% 
+                                    rename(Turbine = Unit) %>% 
+                                      mutate(TS = lubridate::round_date(PCTimeStamp, "10 minutes") ) %>% 
+                                        select(-PCTimeStamp) %>% 
+                                            rename(PCTimeStamp = TS)
+
+
+
+
+pitch_faults = dorenel %>% left_join(category, by = "Code") %>% 
+                        filter(Category == "Pitch System") %>% 
+                                mutate(started = On - 604800, fin = On-600) %>%
+                              
+                            select(Unit, started, fin) %>% 
+                                  
+                                pivot_longer(cols = 2:3, names_to = "onoff", values_to = "PCTimeStamp") %>% 
+                                    rename(Turbine = Unit) %>% 
+                                      mutate(TS = lubridate::round_date(PCTimeStamp, "10 minutes") ) %>% 
+                                        select(-PCTimeStamp) %>% 
+                                            rename(PCTimeStamp = TS)
+
+
+
+
+data_cleaned2 = all_data %>% left_join(all_faults, by = c("PCTimeStamp", "Turbine")) %>% 
+                                  group_by(Turbine) %>% 
+                                    fill(onoff, .direction = "down") %>%
+                                         filter(onoff != "On") %>% 
+                                            select(-onoff) %>% 
+                                        left_join(pitch_faults, by = c("PCTimeStamp", "Turbine")) %>% 
+                                  group_by(Turbine) %>% 
+                                    fill(onoff, .direction = "down") %>%
+                                         mutate(target1 = if_else(onoff == "started", "1", "0"))  %>% 
+                                          filter(!is.na(target1)) %>% 
+                                            left_join(curtail2, by = "PCTimeStamp") %>% 
+                                              fill(starend, .direction = "down") %>% 
+                                                  filter(starend != "Start") %>% 
+                                               filter(PCTimeStamp < as.POSIXct("2022-01-01")) %>%
+                                            mutate(opstate = if_else(Power_min < 1, 
+                                        if_else(Wind_Speed <4, "LOWWIND", "DOWN"),  
+                                        if_else(Pitch_angle_min > -2, 
+                                                if_else(Power_min > 250, 
+                                                        if_else(Power_min < 2850, 
+                                                                if_else((Power_max - Power_min)<150, "Partial", "Full"),
+                                                                "Full"), "Full"), "Full")))  %>% 
+                                              filter(opstate %in% c("Full", "Partial")) %>%
+                                                  left_join(powercurve, by = "Wind_Speed") %>% 
+                                                    mutate(pf = Power_av/3000) %>% 
+                                                    mutate(target = as.factor(target1)) %>%
+                                                  select(target, Gen_RPM, Hyd_oil_pres, Hydrau_pilot_pres, Rotor_rpm, Wind_Speed, Amb_temp, pf,
+                                                         Pitch_Angle_av, Pitch_angle_min, Pitch_a_pressure, Pitch_b_pressure, pitch_c_pressure) 
+                                                    
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+```
