@@ -306,8 +306,143 @@ data_cleaned2 = all_data %>% left_join(all_faults, by = c("PCTimeStamp", "Turbin
                                             left_join(curtail2, by = "PCTimeStamp") %>% 
                                               fill(starend, .direction = "down") %>% 
                                                   filter(starend != "Start") %>% 
-                                               filter(PCTimeStamp < as.POSIXct("2022-01-01")) %>%
-                                            mutate(opstate = if_else(Power_min < 1, 
+                                               filter(PCTimeStamp < as.POSIXct("2022-01-01")) %>% 
+                                                filter(Power_av > 0)
+
+
+
+
+
+
+
+
+
+
+
+
+```
+
+
+```{r}
+
+
+
+No_issues = data_cleaned2 %>% filter(target1 == "0")
+
+
+
+
+power_curve = No_issues %>% group_by(Wind_Speed) %>% 
+                                summarise(med_p = median(Power_av), sd_po = sd(Power_av))
+
+
+no_issues2 = No_issues %>% left_join(power_curve, by = "Wind_Speed") %>% 
+                                mutate(lim = med_p - (sd_po * 1.5)) %>% 
+                                  mutate(fil = if_else(Power_av > lim, "1", "0")) %>% 
+                                    filter(fil == "1")
+
+
+
+```
+
+
+```{r}
+
+
+
+
+
+rotor_curve = no_issues2 %>%
+                                  group_by(Wind_Speed) %>% 
+                                      summarise(rot_rpm_av = mean(Rotor_rpm))
+
+
+
+gencurve = no_issues2 %>% 
+                          group_by(Wind_Speed) %>% 
+                                  summarise(mean_gen = mean(Gen_RPM))
+
+
+
+pitch_curve = no_issues2 %>% 
+                                group_by(Wind_Speed) %>% 
+                                    summarise(mean_pitch = mean(Pitch_Angle_av))
+
+
+
+
+
+
+pressures = no_issues2 %>% ungroup() %>%
+                                
+                                select(Hyd_oil_pres, Hydrau_pilot_pres, Pitch_a_pressure, Pitch_b_pressure, pitch_c_pressure) %>%
+                                    summarise(across(everything(), mean)) %>%
+                                        rename(HOP_AV = Hyd_oil_pres, HPP_av = Hydrau_pilot_pres, PAP_av = Pitch_a_pressure, PBP_av = Pitch_b_pressure, pcp_av = pitch_c_pressure )
+
+
+
+```
+
+
+```{r}
+
+
+
+issues = data_cleaned2 %>% filter(target1 == "1")
+
+
+
+model_data = no_issues2 %>% bind_rows(issues) %>% 
+                                bind_cols(pressures) %>% 
+                                          mutate(delta_HOP = Hyd_oil_pres - HOP_AV, delta_HPP = Hydrau_pilot_pres-HPP_av, delta_PAP = Pitch_a_pressure-PAP_av, delta_PBP = Pitch_b_pressure - PBP_av, delta_pcp = pitch_c_pressure - pcp_av)  %>% 
+                                       left_join(rotor_curve, by = "Wind_Speed") %>% 
+                                           mutate(delta_rotor = Rotor_rpm- rot_rpm_av) %>% 
+                                            left_join(gencurve, by = "Wind_Speed") %>% 
+                                                mutate(delta_gen = Gen_RPM - mean_gen) %>%
+                                              left_join(pitch_curve, by = "Wind_Speed") %>% 
+                                                mutate(delta_pitch = Pitch_Angle_av - mean_pitch) %>% 
+                                                  ungroup() %>%
+                                          select(target1, delta_HOP, delta_HPP, delta_PAP, delta_PBP, delta_pcp, , delta_rotor, delta_gen, 
+                                                 delta_pitch) 
+
+
+
+
+
+
+```
+
+
+
+```{r}
+
+data_cleaned3 = data_cleaned2 %>% bind_cols(pressures) %>% 
+                                          mutate(delta_HOP = Hyd_oil_pres - HOP_AV, delta_HPP = Hydrau_pilot_pres-HPP_av, delta_PAP = Pitch_a_pressure-PAP_av, delta_PBP = Pitch_b_pressure - PBP_av, delta_pcp = pitch_c_pressure - pcp_av)  %>% 
+                                       left_join(rotor_curve, by = "Wind_Speed") %>% 
+                                           mutate(delta_rotor = Rotor_rpm- rot_rpm_av) %>% 
+                                            left_join(gencurve, by = "Wind_Speed") %>% 
+                                                mutate(delta_gen = Gen_RPM - mean_gen) %>%
+                                              left_join(pitch_curve, by = "Wind_Speed") %>% 
+                                                mutate(delta_pitch = Pitch_Angle_av - mean_pitch) %>% 
+                                                  ungroup() %>%
+                                          select(target, delta_HOP, delta_HPP, delta_PAP, delta_PBP, delta_pcp, pf, delta_rotor, delta_gen, 
+                                                 delta_pitch) 
+                                              
+
+
+
+
+
+
+```
+
+
+
+
+```{r}
+
+#%>%
+                                         #   mutate(opstate = if_else(Power_min < 1, 
                                         if_else(Wind_Speed <4, "LOWWIND", "DOWN"),  
                                         if_else(Pitch_angle_min > -2, 
                                                 if_else(Power_min > 250, 
@@ -322,11 +457,6 @@ data_cleaned2 = all_data %>% left_join(all_faults, by = c("PCTimeStamp", "Turbin
                                                          Pitch_Angle_av, Pitch_angle_min, Pitch_a_pressure, Pitch_b_pressure, pitch_c_pressure) 
                                                     
  
-
-
-
-
-
 
 
 
